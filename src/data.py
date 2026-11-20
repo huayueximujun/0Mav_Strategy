@@ -6,39 +6,39 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 
+# 各标的日线文件。cyb 含 OHLC（支持开盘买口径），kc50/sse 仅收盘价
+FILES = {"cyb": "index_cyb_ohlcv.csv", "kc50": "index_kc50_ohlcv.csv", "sse": "index_sse_ohlcv.csv"}
+
 
 def load_amv(path: str | Path | None = None) -> pd.DataFrame:
-    """加载活跃市值（0AMV）日线。
+    """活跃市值（0AMV）日线。返回列: date, o, h, l, c, amv_ret, amv_sd60, amv_3d
 
-    返回列: date, o, h, l, c, amv_ret
+    注意：amv_ret 必须在全量序列上计算，涨跌幅才有意义（跨缺口计算会失真）。
     """
     p = Path(path) if path else DATA_DIR / "amv_daily.csv"
     df = pd.read_csv(p, parse_dates=["date"]).sort_values("date").reset_index(drop=True)
     df["amv_ret"] = df["c"].pct_change()
+    df["amv_sd60"] = df["amv_ret"].rolling(60).std()
+    df["amv_3d"] = df["amv_ret"].rolling(3).sum()
     return df
 
 
 def load_index(name: str, path: str | Path | None = None) -> pd.DataFrame:
-    """加载指数日线。
+    """指数日线。返回列: date, <name>, <name>_open（无开盘价时用收盘价占位）"""
+    p = Path(path) if path else DATA_DIR / FILES[name]
+    df = pd.read_csv(p, parse_dates=["date"])
+    df.columns = [c.strip().lower() for c in df.columns]
+    # 必须优先取 close 列，否则会把 open 当成收盘价
+    val = "close" if "close" in df.columns else [c for c in df.columns if c != "date"][0]
+    out = df.rename(columns={val: name})[["date", name]].copy()
+    out[f"{name}_open"] = df["open"].values if "open" in df.columns else out[name].values
+    return out.sort_values("date").reset_index(drop=True)
 
-    name: cyb(创业板) / kc50(科创50) / sse(上证)
-    返回列: date, close
-    """
-    files = {"cyb": "index_cyb.csv", "kc50": "index_kc50.csv", "sse": "index_sse.csv"}
-    p = Path(path) if path else DATA_DIR / files[name]
-    df = pd.read_csv(p, parse_dates=["date"]).sort_values("date").reset_index(drop=True)
-    val_col = [c for c in df.columns if c != "date"][0]
-    return df.rename(columns={val_col: name})[["date", name]]
 
-
-def merge_all(start: str = "2016-01-01") -> pd.DataFrame:
-    """AMV 与三个指数按交易日对齐。
-
-    返回列: date, o, h, l, c, amv_ret, cyb, kc50, sse
-    """
-    amv = load_amv()
-    out = amv
-    for n in ("cyb", "kc50", "sse"):
+def merge_all(start: str = "2016-01-01", names=("cyb", "kc50", "sse")) -> pd.DataFrame:
+    """AMV 与指数按交易日对齐。返回: date, o,h,l,c, amv_ret, amv_sd60, amv_3d, 各指数收盘与开盘价"""
+    out = load_amv()
+    for n in names:
         out = out.merge(load_index(n), on="date", how="left")
     out = out[out.date >= start].reset_index(drop=True)
     return out
