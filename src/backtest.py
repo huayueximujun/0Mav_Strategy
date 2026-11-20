@@ -67,7 +67,9 @@ def run(df: pd.DataFrame,
                     si = n - 1
             if si <= bi:
                 si = min(bi + 2, n - 1)
-            pos[bi:si] = 1
+            # 关键：bi 日收盘买入，收益从 bi+1 日开始计（持有到 si 日收盘卖出）
+            # 写成 pos[bi:si] 会把买入日涨幅算进来，并漏掉卖出日，导致收益虚高
+            pos[bi + 1:si + 1] = 1
             trades.append(dict(sig_date=df["date"].iloc[i], buy_date=df["date"].iloc[bi],
                                sell_date=df["date"].iloc[si],
                                ret=px[si] / px[bi] - 1, days=si - bi))
